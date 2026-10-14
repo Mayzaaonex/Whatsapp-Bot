@@ -26,6 +26,11 @@ const SESSION_DIR = './session'
 const SESSION_DB = './session/state.sqlite'
 const hasSession = fs.existsSync(SESSION_DIR) && fs.existsSync(SESSION_DB)
 
+// === Variabel global (biar bisa di-set belakangan) ===
+let PLUGINS = new Map()
+let AUTO_HANDLERS = []
+let pluginsReady = false
+
 function ask(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
@@ -186,15 +191,6 @@ client.on('connection', async (event) => {
   }
 })
 
-// === Load plugins ===
-const PLUGINS = await loadPlugins('./_plugins')
-const AUTO_HANDLERS = getAutoHandlers()
-console.log(`[plugin] total ${PLUGINS.size} command, ${AUTO_HANDLERS.length} auto-handler`)
-
-// === Start auto-update checker ===
-const startupConfig = loadConfig()
-startAutoUpdate(client, startupConfig)
-
 // === Reaction helper ===
 async function react(client, to, event, emoji) {
   try {
@@ -294,6 +290,12 @@ async function loadCategoryMenu(categoryId, prefix) {
 client.on('message', async (event) => {
   const buttonResponse = isButtonResponse(event.message)
   if (event.key.fromMe && !buttonResponse) return
+
+  // Kalau plugin belum siap, skip
+  if (!pluginsReady) {
+    console.log('[message] plugin belum siap, skip')
+    return
+  }
 
   const config = loadConfig()
   const prefix = config.prefix || '.'
@@ -436,6 +438,32 @@ client.on('message', async (event) => {
   }
 })
 
-// === Start ===
+// ============================================================
+// === START — CONNECT DULU, BARU LOAD PLUGIN ===
+// ============================================================
+
+console.log('[startup] starting watchdog...')
 startConnectionWatchdog()
-await client.connect()
+
+console.log('[startup] connecting to WhatsApp...')
+const connectPromise = client.connect()   // ← gak await, jalan barengan
+
+console.log('[startup] loading plugins...')
+loadPlugins('./_plugins')
+  .then((p) => {
+    PLUGINS = p
+    AUTO_HANDLERS = getAutoHandlers()
+    pluginsReady = true
+    console.log(`[plugin] total ${PLUGINS.size} command, ${AUTO_HANDLERS.length} auto-handler`)
+
+    // Start auto-update setelah plugins siap
+    const startupConfig = loadConfig()
+    startAutoUpdate(client, startupConfig)
+  })
+  .catch((err) => {
+    console.error('[plugin] gagal load:', err.message)
+  })
+
+console.log('[startup] waiting for connection...')
+await connectPromise
+console.log('[startup] connected!')
