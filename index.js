@@ -6,6 +6,8 @@ import { formatJidForLog, resolveDisplayNumber } from './system/jid.js'
 import { loadConfig, saveConfig, isOwner, normalizeOwnerInput } from './system/config.js'
 import { loadPlugins, getButtonHandler, getAutoHandlers } from './system/plugin-loader.js'
 import { getCategory, sendMenu, MENU_CATEGORIES } from './command/menu.js'
+import { loadRestartState, deleteRestartState } from './system/restart-state.js'
+import { startAutoUpdate } from './system/auto-update.js'
 
 // === Konfigurasi ===
 const logger = new ConsoleLogger('warn')
@@ -94,11 +96,16 @@ const store = createStore({
   }
 })
 
-const client = new WaClient({
-  store,
-  sessionId: 'default',
-  mediaTimeoutMs: 120_000 // 2 menit — default-nya ~30 detik, kekecilan buat video gede/koneksi lambat
-}, logger)
+const client = new WaClient(
+  {
+    store,
+    sessionId: 'default',
+    mediaTimeoutMs: 300000,
+    messageAckTimeoutMs: 120000,
+    messageMaxAttempts: 5
+  },
+  logger
+)
 
 // === Pairing ===
 let pairingRequested = false
@@ -151,11 +158,29 @@ function startConnectionWatchdog() {
   }, 60_000)
 }
 
-client.on('connection', (event) => {
+client.on('connection', async (event) => {
   if (event.status === 'open') {
     connectionOpened = true
     if (connectionTimeout) clearTimeout(connectionTimeout)
     console.log('Bot online.')
+
+    // === Cek restart state ===
+    try {
+      const state = loadRestartState()
+      if (state?.to) {
+        setTimeout(async () => {
+          try {
+            await client.message.send(state.to, '✅ Bot kembali online!')
+            deleteRestartState()
+          } catch (err) {
+            console.error('[restart-state] gagal kirim notif:', err.message)
+            deleteRestartState()
+          }
+        }, 3000)
+      }
+    } catch (err) {
+      console.error('[restart-state] error:', err.message)
+    }
   } else {
     console.log('Koneksi terputus:', event.reason, '| logout?', event.isLogout)
   }
@@ -165,6 +190,10 @@ client.on('connection', (event) => {
 const PLUGINS = await loadPlugins('./_plugins')
 const AUTO_HANDLERS = getAutoHandlers()
 console.log(`[plugin] total ${PLUGINS.size} command, ${AUTO_HANDLERS.length} auto-handler`)
+
+// === Start auto-update checker ===
+const startupConfig = loadConfig()
+startAutoUpdate(client, startupConfig)
 
 // === Reaction helper ===
 async function react(client, to, event, emoji) {
@@ -179,7 +208,7 @@ async function react(client, to, event, emoji) {
   }
 }
 
-// === Extract ID tombol ===
+// === Extract ID tombol / single-select ===
 function extractSelectedId(message) {
   if (!message) return null
 
@@ -319,7 +348,7 @@ client.on('message', async (event) => {
 
   console.log(`[pesan] ${formatJidForLog(senderJid, senderAlt)}: ${text}`)
 
-  // === Auto-handlers (antilink, dll) ===
+  // === Auto-handlers (antilink, mute, dll) ===
   for (const auto of AUTO_HANDLERS) {
     try {
       const consumed = await auto.handler(client, {
