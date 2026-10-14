@@ -1,0 +1,16 @@
+node_modules/
+session/
+session/*
+tmp/
+tmp/*
+!tmp/.gitkeep
+.env
+.env.*
+push.sh
+push.bat
+.DS_Store
+Thumbs.db
+*.log
+logs/*.log
+.vscode/
+.idea/
