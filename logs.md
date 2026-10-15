@@ -6,6 +6,7 @@
 
 ---
 
+{14:10:2026:1.2.5} fix bug audio swgc
 {14:10:2026:1.2.4} fix bug audio swgc
 {14:10:2026:1.2.3} fix bug audio swgc
 {14:10:2026:1.2.2} add mp4 converter to mp3

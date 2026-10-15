@@ -82,7 +82,14 @@ function baseMedia(m) {
     fileEncSha256: m.fileEncSha256,
     fileLength: m.fileLength,
     mediaKeyTimestamp: m.mediaKeyTimestamp,
-    mimetype: m.mimetype
+    mimetype: m.mimetype,
+    // PENTING: client.message.upload() generate streamingSidecar (+ metadataUrl)
+    // otomatis buat type audio/ptt/video/ptv/gif — field ini dibutuhin WA MOBILE
+    // NATIVE APP buat validasi/decode media streaming. WA Web pakai <audio>/<video>
+    // HTML biasa jadi cuek sama field ini (makanya kelihatan "fine" di Web), tapi
+    // kalau hilang, native app mobile nolak muter medianya ("file bermasalah").
+    streamingSidecar: m.streamingSidecar,
+    metadataUrl: m.metadataUrl
   }
   for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k]
   return out
