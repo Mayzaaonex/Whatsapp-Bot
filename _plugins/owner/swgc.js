@@ -191,15 +191,30 @@ export async function handler(client, { to, event, args }) {
         return { ok: false }
       }
 
-      // === Prepare voice note (kalau audio) ===
+      // === Prepare voice note (kalau audio asli emang ptt/voice note) ===
+      // PENTING: ikutin flag ptt ASLI dari pesan yang di-reply, jangan dipaksa true.
+      // Kalau dipaksa true buat semua audioMessage, file musik/MP3 biasa (misal
+      // hasil .tomp3) bakal diupload dengan type "ptt" (voice note) padahal isinya
+      // bukan Opus/OGG — WA nolak muter itu sebagai voice note meski file MP3-nya
+      // sendiri valid (makanya bisa diputer normal di luar swgc).
       let prep = null
-      const isPtt = mediaKind === 'audioMessage' ? true : !!orig.ptt
+      const isPtt = !!orig.ptt
 
-      if (mediaKind === 'audioMessage') {
+      if (mediaKind === 'audioMessage' && isPtt) {
         try {
           prep = await prepareVoiceNote(file)
         } catch (e) {
           console.log('[swgc] ffmpeg gagal:', e.message)
+        }
+
+        // Kalau convert ke opus gagal, JANGAN lanjut ngaku-ngaku ptt pakai data
+        // mentah yang belum ke-convert — itu bakal upload file salah format
+        // dengan label ptt, bikin audio-nya error pas diputer. Mending gagal
+        // jelas drpd ngirim pesan yang keliatan "berhasil" tapi gak bisa diputer.
+        if (!prep) {
+          await client.message.send(to, '❌ Gagal convert voice note ke format Opus. Coba lagi.')
+          cleanup(file)
+          return { ok: false }
         }
       }
 
