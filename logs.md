@@ -6,6 +6,7 @@
 
 ---
 
+{14:10:2026:1.2.3} fix bug audio swgc
 {14:10:2026:1.2.2} add mp4 converter to mp3
 {14:10:2026:1.2.1} add more functions for owner
 {13:10:2026:1.2.0} add group commands (kick, promote, demote, add, open, close)
