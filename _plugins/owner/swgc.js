@@ -272,12 +272,19 @@ export async function handler(client, { to, event, args }) {
           }
         }
       } else {
+        // PENTING: "ptt" di pesan akhir HARUS ikutin isPtt asli, jangan di-hardcode true.
+        // WA Web pakai <audio> HTML biasa (cuek sama flag ptt, asal codec-nya kebaca
+        // browser ya jalan), tapi WA mobile app punya decoder voice-note yang strict
+        // nungguin Opus/OGG kalau ptt:true — diklaim ptt tapi isinya MP3 bakal ditolak
+        // ("audio tidak tersedia karena file bermasalah"), walau di WA Web keliatan fine.
         statusMessage = {
           audioMessage: {
             ...base,
-            ptt: true,
+            ptt: isPtt,
             seconds: orig.seconds,
-            waveform: prep?.waveform || (orig.waveform?.length ? toBytes(orig.waveform) : fakeWaveform())
+            ...(isPtt
+              ? { waveform: prep?.waveform || (orig.waveform?.length ? toBytes(orig.waveform) : fakeWaveform()) }
+              : {})
           }
         }
         for (const k of Object.keys(statusMessage.audioMessage)) {
