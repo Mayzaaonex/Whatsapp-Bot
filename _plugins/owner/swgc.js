@@ -129,14 +129,15 @@ function makeWaveform(pcm, bars = 64) {
   return Uint8Array.from(vals.map((v) => Math.round((v / max) * 100)))
 }
 
-function fakeWaveform(bars = 64) {
-  return Uint8Array.from(
-    { length: bars },
-    (_, i) => 20 + Math.round(60 * Math.abs(Math.sin(i * 0.7) * Math.cos(i * 0.23)))
-  )
-}
-
-async function prepareVoiceNote(file) {
+// Convert APAPUN format audio aslinya (MP3, AAC, M4A, dll) ke Opus/OGG 48kHz mono.
+// PENTING: ini sekarang jalan buat SEMUA audioMessage yang di-reply ke .swgc, bukan
+// cuma yang flag ptt-nya true. Alasannya: audio status di WhatsApp (termasuk group
+// status) SELALU dirender sebagai voice-note/waveform di UI, apapun sumbernya. Jadi
+// walau file aslinya musik/MP3 biasa (misal hasil .tomp3, ptt:false), begitu mau
+// dijadiin status dia tetep butuh Opus/OGG 48k — WA Web cuek (pakai <audio> HTML
+// biasa, apa aja asal browser bisa decode), tapi WA mobile native app nolak mentah2
+// kalau format aslinya bukan Opus ("audio tidak tersedia karena file bermasalah").
+async function prepareStatusAudio(file) {
   const ffmpegPath = getFfmpegPath()
   const out = tmpPath('ogg')
   try {
@@ -198,28 +199,22 @@ export async function handler(client, { to, event, args }) {
         return { ok: false }
       }
 
-      // === Prepare voice note (kalau audio asli emang ptt/voice note) ===
-      // PENTING: ikutin flag ptt ASLI dari pesan yang di-reply, jangan dipaksa true.
-      // Kalau dipaksa true buat semua audioMessage, file musik/MP3 biasa (misal
-      // hasil .tomp3) bakal diupload dengan type "ptt" (voice note) padahal isinya
-      // bukan Opus/OGG — WA nolak muter itu sebagai voice note meski file MP3-nya
-      // sendiri valid (makanya bisa diputer normal di luar swgc).
+      // === Convert audio ke Opus/48k buat status — SELALU, gak peduli ptt asli ===
       let prep = null
-      const isPtt = !!orig.ptt
 
-      if (mediaKind === 'audioMessage' && isPtt) {
+      if (mediaKind === 'audioMessage') {
         try {
-          prep = await prepareVoiceNote(file)
+          prep = await prepareStatusAudio(file)
         } catch (e) {
           console.log('[swgc] ffmpeg gagal:', e.message)
         }
 
-        // Kalau convert ke opus gagal, JANGAN lanjut ngaku-ngaku ptt pakai data
-        // mentah yang belum ke-convert — itu bakal upload file salah format
-        // dengan label ptt, bikin audio-nya error pas diputer. Mending gagal
-        // jelas drpd ngirim pesan yang keliatan "berhasil" tapi gak bisa diputer.
+        // Kalau convert gagal, JANGAN lanjut upload file mentah — itu bakal
+        // diupload dengan codec yang gak sesuai ekspektasi status WA, bikin
+        // audio-nya error pas diputer. Mending gagal jelas drpd ngirim pesan
+        // yang keliatan "berhasil" tapi gak bisa diputer di HP.
         if (!prep) {
-          await client.message.send(to, '❌ Gagal convert voice note ke format Opus. Coba lagi.')
+          await client.message.send(to, '❌ Gagal convert audio ke format Opus. Coba lagi.')
           cleanup(file)
           return { ok: false }
         }
@@ -228,11 +223,11 @@ export async function handler(client, { to, event, args }) {
       // === Upload ===
       const uploadType = mediaKind === 'imageMessage' ? 'image'
         : mediaKind === 'videoMessage' ? 'video'
-        : (isPtt ? 'ptt' : 'audio')
+        : 'ptt'
 
       const fallbackMime = mediaKind === 'imageMessage' ? 'image/jpeg'
         : mediaKind === 'videoMessage' ? 'video/mp4'
-        : (isPtt ? 'audio/ogg; codecs=opus' : 'audio/mpeg')
+        : 'audio/ogg; codecs=opus'
 
       let desc
       try {
@@ -279,19 +274,16 @@ export async function handler(client, { to, event, args }) {
           }
         }
       } else {
-        // PENTING: "ptt" di pesan akhir HARUS ikutin isPtt asli, jangan di-hardcode true.
-        // WA Web pakai <audio> HTML biasa (cuek sama flag ptt, asal codec-nya kebaca
-        // browser ya jalan), tapi WA mobile app punya decoder voice-note yang strict
-        // nungguin Opus/OGG kalau ptt:true — diklaim ptt tapi isinya MP3 bakal ditolak
-        // ("audio tidak tersedia karena file bermasalah"), walau di WA Web keliatan fine.
+        // Status audio WhatsApp SELALU ditampilin ala voice-note (waveform),
+        // apapun sumbernya — jadi ptt dipaksa true di sini, dan karena audio
+        // udah pasti ke-convert ke Opus di atas, klaim ptt:true ini sekarang
+        // valid (gak ada lagi mismatch codec vs flag kayak sebelumnya).
         statusMessage = {
           audioMessage: {
             ...base,
-            ptt: isPtt,
+            ptt: true,
             seconds: orig.seconds,
-            ...(isPtt
-              ? { waveform: prep?.waveform || (orig.waveform?.length ? toBytes(orig.waveform) : fakeWaveform()) }
-              : {})
+            waveform: prep.waveform || fakeWaveform()
           }
         }
         for (const k of Object.keys(statusMessage.audioMessage)) {
@@ -318,4 +310,11 @@ export async function handler(client, { to, event, args }) {
     await client.message.send(to, `❌ Gagal: ${err.message}`)
     return { ok: false }
   }
+}
+
+function fakeWaveform(bars = 64) {
+  return Uint8Array.from(
+    { length: bars },
+    (_, i) => 20 + Math.round(60 * Math.abs(Math.sin(i * 0.7) * Math.cos(i * 0.23)))
+  )
 }
