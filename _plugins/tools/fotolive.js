@@ -1,16 +1,11 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sendFotoLive } from '../../command/fotolive.js'
-import { getRandomThumbnailUrl } from '../../system/thumbnails.js'
+import { TEMP_DIR, ensureTempDir } from '../../system/tempDir.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const ROOT = path.join(__dirname, '..', '..')
-
-// Fallback lokal kalau assets/thumbnails.json kosong/gak ada link yang jalan.
-// JANGAN hardcode satu URL doang di sini — link remote bisa mati/404 kapan aja
-// (ini yang kemarin bikin .fotolive error padahal .menu tetep jalan).
-const FALLBACK_VIDEO_PATH = path.join(ROOT, 'assets', 'alya720.mp4')
 
 export const meta = {
   name: 'fotolive',
@@ -18,41 +13,49 @@ export const meta = {
   category: 'tools'
 }
 
-export async function handler(client, { to, args }) {
-  // .fotolive <url>  → pakai URL yang dikasih user
-  // .fotolive         → random dari assets/thumbnails.json, fallback video lokal
-  const explicitUrl = args[0]
+const USAGE_TEXT =
+  `⚠️ *Cara pakai .fotolive:*\n\n` +
+  `• Reply video + ketik *.fotolive*\n` +
+  `• Atau kirim video + caption *.fotolive*`
 
-  if (explicitUrl && !/^https?:\/\//.test(explicitUrl)) {
-    await client.message.send(to, '⚠️ Format: *.fotolive [url-video]*')
+// Video wajib dari reply, ATAU dari video yang dikirim langsung bareng
+// caption ".fotolive" — gak ada sumber lain (gak ada URL, gak ada random).
+function findQuotedVideo(event) {
+  const msg = event?.message || {}
+  const quoted = msg.extendedTextMessage?.contextInfo?.quotedMessage
+
+  if (quoted?.videoMessage) return { videoMessage: quoted.videoMessage }
+  if (msg.videoMessage) return { videoMessage: msg.videoMessage }
+  return null
+}
+
+export async function handler(client, { to, event }) {
+  const quotedVideo = findQuotedVideo(event)
+
+  if (!quotedVideo) {
+    await client.message.send(to, USAGE_TEXT)
     return { ok: false }
   }
 
-  const videoUrl = explicitUrl || getRandomThumbnailUrl()
+  ensureTempDir()
+  const downloadedPath = path.join(TEMP_DIR, `fotolive-reply-${Date.now()}.mp4`)
 
   try {
-    if (videoUrl) {
-      await sendFotoLive(client, { to, videoUrl })
-    } else {
-      await sendFotoLive(client, { to, videoPath: FALLBACK_VIDEO_PATH })
+    try {
+      await client.message.downloadToFile(quotedVideo, downloadedPath)
+    } catch (err) {
+      console.error('[fotolive] gagal download video:', err.message)
+      await client.message.send(to, `❌ Gagal download video: ${err.message}`)
+      return { ok: false }
     }
+
+    await sendFotoLive(client, { to, videoPath: downloadedPath })
     return { ok: true }
   } catch (err) {
     console.error('[fotolive] GAGAL:', err.message)
-
-    // Kalau URL (dari thumbnails.json atau user) gagal di-fetch, coba sekali lagi
-    // pakai video lokal sebelum nyerah — biar command ini gak gampang down cuma
-    // gara-gara satu link remote mati.
-    if (videoUrl) {
-      try {
-        await sendFotoLive(client, { to, videoPath: FALLBACK_VIDEO_PATH })
-        return { ok: true }
-      } catch (fallbackErr) {
-        console.error('[fotolive] fallback lokal juga gagal:', fallbackErr.message)
-      }
-    }
-
     await client.message.send(to, `❌ Gagal: ${err.message}`)
     return { ok: false }
+  } finally {
+    try { fs.unlinkSync(downloadedPath) } catch {}
   }
 }
