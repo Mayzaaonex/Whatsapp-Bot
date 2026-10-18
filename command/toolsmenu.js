@@ -12,6 +12,7 @@ export function render(prefix) {
     `│ • *${prefix}topixel* (kirim/reply gambar, atau URL)\n` +
     `│ • *${prefix}fotolive* (kirim/reply video)\n` +
     `│ • *${prefix}tomp3* (kirim/reply video, atau URL)\n` +
+    `│ • *${prefix}toimg* (reply sticker)\n` +
     `╰──────────`
   )
 }
