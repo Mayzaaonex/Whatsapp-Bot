@@ -6,6 +6,7 @@
 
 ---
 
+{18:10:2026:1.2.6} fix fotolive(tools)
 {14:10:2026:1.2.5} fix bug audio swgc
 {14:10:2026:1.2.4} fix bug audio swgc
 {14:10:2026:1.2.3} fix bug audio swgc
