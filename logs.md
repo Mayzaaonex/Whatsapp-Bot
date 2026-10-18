@@ -6,6 +6,7 @@
 
 ---
 
+{18:10:2026:1.2.9} add tools toimg.js
 {18:10:2026:1.2.8} fix update funsctions
 {18:10:2026:1.2.7} fix fotolive(tools)
 {18:10:2026:1.2.6} fix fotolive(tools)
