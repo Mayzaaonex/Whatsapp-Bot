@@ -1,6 +1,4 @@
 node_modules/
-session/
-session/*
 tmp/
 tmp/*
 !tmp/.gitkeep
