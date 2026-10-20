@@ -1,5 +1,6 @@
 import readline from 'node:readline'
 import fs from 'node:fs'
+import qrcodeTerminal from 'qrcode-terminal'
 import { ConsoleLogger, createStore, WaClient } from 'zapo-js'
 import { createSqliteStore } from '@zapo-js/store-sqlite'
 import { formatJidForLog, resolveDisplayNumber } from './system/jid.js'
@@ -41,9 +42,14 @@ function ask(question) {
   })
 }
 
+// Custom pairing code — FIXED, selalu ini, gak ditanya/di-random lagi.
+// Harus persis 8 karakter dari alfabet Crockford (gak ada 0, I, L, O, U).
+const CUSTOM_PAIRING_CODE = 'MAYZABQT'
+
 // === Pilih metode pairing ===
 let pairingMethod = null
 let botNumber = null
+let customPairingCode = CUSTOM_PAIRING_CODE
 
 async function choosePairingMethod() {
   if (hasSession) return
@@ -68,6 +74,7 @@ async function choosePairingMethod() {
           console.log('Nomor tidak valid, coba lagi.')
         }
       }
+      console.log(`Custom pairing code: ${CUSTOM_PAIRING_CODE} (fixed)`)
     } else {
       console.log('Pilihan tidak valid. Masukkan 1 atau 2.')
     }
@@ -113,34 +120,61 @@ const client = new WaClient(
 )
 
 // === Pairing ===
-let pairingRequested = false
+let pairingCodeIssued = false
 
+// PENTING: di zapo-js ^1.10.0, event 'auth_pairing_required' cuma nembak buat
+// REFRESH kode (pas kode lama expired/server minta kode baru) — BUKAN buat
+// trigger request yang PERTAMA. Kalau nunggu event itu buat first request,
+// gak bakal pernah ke-trigger (ini penyebab "gagal menautkan perangkat" kemarin).
+// client.auth.requestPairingCode() cuma butuh socket udah connect (bukan nunggu
+// full auth), jadi buat request pertama kita polling aja — retry tiap 1 detik
+// sampe berhasil atau abis percobaan, gak gantung nunggu event yang gak dateng.
 async function requestPairingCode() {
-  if (pairingRequested) return
-  pairingRequested = true
-  try {
-    const code = await client.auth.requestPairingCode(botNumber)
-    const formatted = code.match(/.{1,4}/g)?.join('-') ?? code
-    console.log('\n=== PAIRING CODE ===')
-    console.log(formatted)
-    console.log('Buka WhatsApp di HP -> Perangkat Tertaut -> Tautkan dengan nomor telepon')
-    console.log('Masukkan kode di atas.\n')
-  } catch (err) {
-    console.error('[gagal minta pairing code]', err)
-    pairingRequested = false
+  const code = await client.auth.requestPairingCode(
+    botNumber,
+    true,
+    customPairingCode
+  )
+  pairingCodeIssued = true
+  const formatted = code.match(/.{1,4}/g)?.join('-') ?? code
+  console.log('\n=== PAIRING CODE ===')
+  console.log(formatted)
+  console.log('Buka WhatsApp di HP -> Perangkat Tertaut -> Tautkan dengan nomor telepon')
+  console.log('Masukkan kode di atas.\n')
+}
+
+async function pollInitialPairingCode(maxAttempts = 30, intervalMs = 1000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await requestPairingCode()
+      return
+    } catch (err) {
+      if (i === maxAttempts - 1) {
+        console.error('[gagal minta pairing code]', err)
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
   }
 }
 
 client.on('auth_qr', ({ qr }) => {
   if (pairingMethod === 'qr') {
     console.log('\n=== SCAN QR ===')
-    console.log(qr)
-    console.log('Buka WhatsApp -> Perangkat Tertaut -> Tautkan perangkat\n')
+    // Render QR beneran ke ASCII-art di terminal, bukan dump string mentah.
+    qrcodeTerminal.generate(qr, { small: true }, (qrAscii) => {
+      console.log(qrAscii)
+      console.log('Buka WhatsApp -> Perangkat Tertaut -> Tautkan perangkat\n')
+    })
   }
 })
 
+// Ini SEKARANG bener-bener cuma buat refresh (kode lama di-invalidate server),
+// cuma jalan kalau kode pertama udah pernah berhasil diterbitin sebelumnya.
 client.on('auth_pairing_required', () => {
-  if (pairingMethod === 'code') requestPairingCode()
+  if (pairingMethod === 'code' && pairingCodeIssued) {
+    requestPairingCode().catch((err) => console.error('[gagal refresh pairing code]', err))
+  }
 })
 
 client.on('auth_paired', ({ credentials }) => {
@@ -447,6 +481,13 @@ startConnectionWatchdog()
 
 console.log('[startup] connecting to WhatsApp...')
 const connectPromise = client.connect()   // ← gak await, jalan barengan
+
+// Mulai minta pairing code SEGERA (gak nunggu event apapun) — connect() di atas
+// sendiri gak bakal resolve sampe proses pairing beneran selesai, jadi ini
+// harus jalan paralel, bukan nunggu connectPromise selesai dulu.
+if (pairingMethod === 'code' && !hasSession) {
+  pollInitialPairingCode()
+}
 
 console.log('[startup] loading plugins...')
 loadPlugins('./_plugins')
