@@ -143,16 +143,29 @@ async function prepareStatusAudio(file) {
   try {
     await runCmd(ffmpegPath, [
       '-v', 'error', '-y', '-i', file, '-vn',
-      '-c:a', 'libopus', '-b:a', '32k', '-ar', '48000', '-ac', '1',
+      '-map_metadata', '-1',
+      '-c:a', 'libopus', '-b:a', '64k', '-vbr', 'on', '-compression_level', '10',
+      '-application', 'voip', '-frame_duration', '60',
+      '-ar', '48000', '-ac', '1',
       '-f', 'ogg', out
     ])
     const pcm = await runCmd(ffmpegPath, [
       '-v', 'error', '-i', out, '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', '-'
     ])
+    // PENTING: hitung durasi dari HASIL CONVERT-ANNYA SENDIRI, jangan ngandelin
+    // orig.seconds (metadata pesan yang di-reply). Audio asli dari WA/HP biasanya
+    // emang selalu punya seconds, tapi audio hasil kiriman bot sendiri (misal
+    // keluaran .tomp3) SERING gak punya field itu sama sekali (gak ada media
+    // processor yang auto-isi) — begitu seconds undefined, field-nya ke-strip
+    // total dari status audio, dan WA native app nolak voice-note TANPA durasi.
+    // Makanya "audio asli" kerja tapi "audio hasil convertan bot" error di .swgc.
+    const samples = Math.floor(pcm.length / 2)
+    const seconds = Math.max(1, Math.round(samples / 8000))
     return {
       file: out,
       mimetype: 'audio/ogg; codecs=opus',
       waveform: makeWaveform(pcm),
+      seconds,
       tmp: out
     }
   } catch (e) {
@@ -282,7 +295,7 @@ export async function handler(client, { to, event, args }) {
           audioMessage: {
             ...base,
             ptt: true,
-            seconds: orig.seconds,
+            seconds: prep.seconds,
             waveform: prep.waveform || fakeWaveform()
           }
         }

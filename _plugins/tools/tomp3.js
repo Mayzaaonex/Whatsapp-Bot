@@ -100,7 +100,10 @@ async function convertToVoiceNote(inputPath) {
   await new Promise((resolve, reject) => {
     const p = spawn(ffmpegPath, [
       '-y', '-v', 'error', '-i', inputPath, '-vn',
-      '-c:a', 'libopus', '-b:a', '32k', '-ar', '48000', '-ac', '1',
+      '-map_metadata', '-1',
+      '-c:a', 'libopus', '-b:a', '64k', '-vbr', 'on', '-compression_level', '10',
+      '-application', 'voip', '-frame_duration', '60',
+      '-ar', '48000', '-ac', '1',
       '-f', 'ogg', outPath
     ])
     let err = ''

@@ -6,6 +6,7 @@
 
 ---
 
+{18:10:2026:1.3.0} fix swgc and tomp3
 {18:10:2026:1.3.0} fix tomp3
 {18:10:2026:1.2.9} add tools toimg.js
 {18:10:2026:1.2.8} fix update funsctions
